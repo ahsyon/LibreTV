@@ -239,8 +239,33 @@ export const handler = async (event, context) => {
         };
     }
 
-    // --- 验证鉴权 ---
-    if (!validateAuth(event)) {
+    // --- 提取目标URL并检查是否为图片请求 ---
+    let encodedUrlPath = '';
+    const proxyPrefix = '/proxy/';
+    if (event.path && event.path.startsWith(proxyPrefix)) {
+        encodedUrlPath = event.path.substring(proxyPrefix.length);
+    }
+
+    const targetUrl = getTargetUrlFromPath(encodedUrlPath);
+    logDebug(`Resolved target URL: ${targetUrl || 'null'}`);
+
+    if (!targetUrl) {
+        return {
+            statusCode: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ success: false, error: "Invalid proxy request path." }),
+        };
+    }
+
+    const { cleanUrl, headers: extraHeaders } = extractHeadersFromUrl(targetUrl);
+    logDebug(`Clean URL: ${cleanUrl}, Extra Headers: ${JSON.stringify(extraHeaders)}`);
+
+    // --- 检查是否为图片请求，跳过认证 ---
+    const isImageRequest = /\.(jpg|jpeg|png|gif|webp|svg|ico)(\?|$)/i.test(cleanUrl) || 
+                           (event.headers && event.headers['accept'] && event.headers['accept'].includes('image/'));
+    
+    // --- 验证鉴权（图片请求跳过） ---
+    if (!isImageRequest && !validateAuth(event)) {
         console.warn('Netlify 代理请求鉴权失败');
         return {
             statusCode: 401,

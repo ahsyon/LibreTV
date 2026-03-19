@@ -517,8 +517,10 @@ function renderDoubanCards(data, container) {
                 .replace(/</g, '&lt;')
                 .replace(/>/g, '&gt;');
             
-            // 豆瓣图片直接显示
-            const proxiedCoverUrl = item.cover;
+            // 豆瓣图片通过代理添加 Referer 头
+            const originalCoverUrl = item.cover;
+            const urlWithHeaders = `${originalCoverUrl}@Referer=https://movie.douban.com/`;
+            const proxiedCoverUrl = PROXY_URL + encodeURIComponent(urlWithHeaders);
             
             // 为不同设备优化卡片布局
             card.innerHTML = `
