@@ -516,9 +516,10 @@ async function renderDoubanCards(data, container) {
                 .replace(/</g, '&lt;')
                 .replace(/>/g, '&gt;');
             
-            // 处理图片URL - 使用 allorigins 图片代理（处理 CORS 和 Referer 问题）
+            // 处理图片URL - 使用移动端豆瓣 Referer
             const originalCoverUrl = item.cover;
-            const proxiedCoverUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(originalCoverUrl)}`;
+            const urlWithHeaders = `${originalCoverUrl}@Referer=https://m.douban.com/`;
+            const proxiedCoverUrl = await (window.ProxyAuth?.addAuthToProxyUrl?.(PROXY_URL + encodeURIComponent(urlWithHeaders)) || Promise.resolve(PROXY_URL + encodeURIComponent(urlWithHeaders)));
             
             // 为不同设备优化卡片布局
             card.innerHTML = `

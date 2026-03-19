@@ -57,7 +57,7 @@ function extractHeadersFromUrl(targetUrl) {
     const headers = {};
     const refererMatch = targetUrl.match(/@Referer=(https?:\/\/[^/]+)/);
     if (refererMatch) {
-        headers['Referer'] = refererMatch[1] + '/';
+        headers['referer'] = refererMatch[1] + '/';
         return {
             cleanUrl: targetUrl.replace(/@Referer=.*$/, ''),
             headers
@@ -141,9 +141,19 @@ async function fetchContentWithType(targetUrl, requestHeaders, extraHeaders = {}
         'User-Agent': getRandomUserAgent(),
         'Accept': requestHeaders['accept'] || '*/*',
         'Accept-Language': requestHeaders['accept-language'] || 'zh-CN,zh;q=0.9,en;q=0.8',
-        'Referer': requestHeaders['referer'] || new URL(targetUrl).origin,
     };
-    Object.assign(headers, extraHeaders);
+    
+    // 如果 extraHeaders 中有 referer，使用它；否则使用 targetUrl 的 origin
+    if (extraHeaders['referer']) {
+        headers['referer'] = extraHeaders['referer'];
+    } else {
+        try {
+            headers['referer'] = new URL(targetUrl).origin + '/';
+        } catch (e) {
+            headers['referer'] = 'https://movie.douban.com/';
+        }
+    }
+    
     Object.keys(headers).forEach(key => headers[key] === undefined || headers[key] === null || headers[key] === '' ? delete headers[key] : {});
     logDebug(`Fetching target: ${targetUrl} with headers: ${JSON.stringify(headers)}`);
     try {
