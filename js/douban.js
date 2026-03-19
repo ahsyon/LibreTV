@@ -388,7 +388,7 @@ function fetchDoubanTags() {
 }
 
 // 渲染热门推荐内容
-function renderRecommend(tag, pageLimit, pageStart) {
+async function renderRecommend(tag, pageLimit, pageStart) {
     const container = document.getElementById("douban-results");
     if (!container) return;
 
@@ -407,19 +407,18 @@ function renderRecommend(tag, pageLimit, pageStart) {
     const target = `https://movie.douban.com/j/search_subjects?type=${doubanMovieTvCurrentSwitch}&tag=${tag}&sort=recommend&page_limit=${pageLimit}&page_start=${pageStart}`;
     
     // 使用通用请求函数
-    fetchDoubanData(target)
-        .then(data => {
-            renderDoubanCards(data, container);
-        })
-        .catch(error => {
-            console.error("获取豆瓣数据失败：", error);
-            container.innerHTML = `
-                <div class="col-span-full text-center py-8">
-                    <div class="text-red-400">❌ 获取豆瓣数据失败，请稍后重试</div>
-                    <div class="text-gray-500 text-sm mt-2">提示：使用VPN可能有助于解决此问题</div>
-                </div>
-            `;
-        });
+    try {
+        const data = await fetchDoubanData(target);
+        await renderDoubanCards(data, container);
+    } catch (error) {
+        console.error("获取豆瓣数据失败：", error);
+        container.innerHTML = `
+            <div class="col-span-full text-center py-8">
+                <div class="text-red-400">❌ 获取豆瓣数据失败，请稍后重试</div>
+                <div class="text-gray-500 text-sm mt-2">提示：使用VPN可能有助于解决此问题</div>
+            </div>
+        `;
+    }
 }
 
 async function fetchDoubanData(url) {
@@ -481,7 +480,7 @@ async function fetchDoubanData(url) {
 }
 
 // 抽取渲染豆瓣卡片的逻辑到单独函数
-function renderDoubanCards(data, container) {
+async function renderDoubanCards(data, container) {
     // 创建文档片段以提高性能
     const fragment = document.createDocumentFragment();
     
@@ -494,8 +493,8 @@ function renderDoubanCards(data, container) {
         `;
         fragment.appendChild(emptyEl);
     } else {
-        // 循环创建每个影视卡片
-        data.subjects.forEach(item => {
+        // 循环创建每个影视卡片（使用 for...of 支持 async/await）
+        for (const item of data.subjects) {
             const card = document.createElement("div");
             card.className = "bg-[#111] hover:bg-[#222] transition-all duration-300 rounded-lg overflow-hidden flex flex-col transform hover:scale-105 shadow-md hover:shadow-lg";
             
@@ -520,7 +519,7 @@ function renderDoubanCards(data, container) {
             // 处理图片URL - 使用代理并添加 Referer 头
             const originalCoverUrl = item.cover;
             const urlWithHeaders = `${originalCoverUrl}@Referer=https://movie.douban.com/`;
-            const proxiedCoverUrl = PROXY_URL + encodeURIComponent(urlWithHeaders);
+            const proxiedCoverUrl = await (window.ProxyAuth?.addAuthToProxyUrl?.(PROXY_URL + encodeURIComponent(urlWithHeaders)) || Promise.resolve(PROXY_URL + encodeURIComponent(urlWithHeaders)));
             
             // 为不同设备优化卡片布局
             card.innerHTML = `
@@ -549,7 +548,7 @@ function renderDoubanCards(data, container) {
             `;
             
             fragment.appendChild(card);
-        });
+        }
     }
     
     // 清空并添加所有新元素
