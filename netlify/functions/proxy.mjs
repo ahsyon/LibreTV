@@ -53,6 +53,19 @@ function getTargetUrlFromPath(encodedPath) {
     } catch (e) { logDebug(`Error decoding target URL: ${encodedPath} - ${e.message}`); return null; }
 }
 
+function extractHeadersFromUrl(targetUrl) {
+    const headers = {};
+    const refererMatch = targetUrl.match(/@Referer=(https?:\/\/[^/]+)/);
+    if (refererMatch) {
+        headers['Referer'] = refererMatch[1] + '/';
+        return {
+            cleanUrl: targetUrl.replace(/@Referer=.*$/, ''),
+            headers
+        };
+    }
+    return { cleanUrl: targetUrl, headers };
+}
+
 function getBaseUrl(urlStr) {
     if (!urlStr) return '';
     try {
@@ -123,13 +136,14 @@ function validateAuth(event) {
     return true;
 }
 
-async function fetchContentWithType(targetUrl, requestHeaders) {
+async function fetchContentWithType(targetUrl, requestHeaders, extraHeaders = {}) {
     const headers = {
         'User-Agent': getRandomUserAgent(),
         'Accept': requestHeaders['accept'] || '*/*',
         'Accept-Language': requestHeaders['accept-language'] || 'zh-CN,zh;q=0.9,en;q=0.8',
         'Referer': requestHeaders['referer'] || new URL(targetUrl).origin,
     };
+    Object.assign(headers, extraHeaders);
     Object.keys(headers).forEach(key => headers[key] === undefined || headers[key] === null || headers[key] === '' ? delete headers[key] : {});
     logDebug(`Fetching target: ${targetUrl} with headers: ${JSON.stringify(headers)}`);
     try {
@@ -169,20 +183,20 @@ function processMediaPlaylist(url, content) {
         output.push(line);
     } return output.join('\n');
 }
-async function processM3u8Content(targetUrl, content, recursionDepth = 0) {
-    if (content.includes('#EXT-X-STREAM-INF') || content.includes('#EXT-X-MEDIA:')) { logDebug(`Detected master playlist: ${targetUrl} (Depth: ${recursionDepth})`); return await processMasterPlaylist(targetUrl, content, recursionDepth); }
+async function processM3u8Content(targetUrl, content, recursionDepth = 0, extraHeaders = {}) {
+    if (content.includes('#EXT-X-STREAM-INF') || content.includes('#EXT-X-MEDIA:')) { logDebug(`Detected master playlist: ${targetUrl} (Depth: ${recursionDepth})`); return await processMasterPlaylist(targetUrl, content, recursionDepth, extraHeaders); }
     logDebug(`Detected media playlist: ${targetUrl} (Depth: ${recursionDepth})`); return processMediaPlaylist(targetUrl, content);
 }
-async function processMasterPlaylist(url, content, recursionDepth) {
+async function processMasterPlaylist(url, content, recursionDepth, extraHeaders = {}) {
     if (recursionDepth > MAX_RECURSION) { throw new Error(`Max recursion depth (${MAX_RECURSION}) exceeded for master playlist: ${url}`); }
     const baseUrl = getBaseUrl(url); const lines = content.split('\n'); let highestBandwidth = -1; let bestVariantUrl = '';
     for (let i = 0; i < lines.length; i++) { if (lines[i].startsWith('#EXT-X-STREAM-INF')) { const bandwidthMatch = lines[i].match(/BANDWIDTH=(\d+)/); const currentBandwidth = bandwidthMatch ? parseInt(bandwidthMatch[1], 10) : 0; let variantUriLine = ''; for (let j = i + 1; j < lines.length; j++) { const line = lines[j].trim(); if (line && !line.startsWith('#')) { variantUriLine = line; i = j; break; } } if (variantUriLine && currentBandwidth >= highestBandwidth) { highestBandwidth = currentBandwidth; bestVariantUrl = resolveUrl(baseUrl, variantUriLine); } } }
     if (!bestVariantUrl) { logDebug(`No BANDWIDTH found, trying first URI in: ${url}`); for (let i = 0; i < lines.length; i++) { const line = lines[i].trim(); if (line && !line.startsWith('#') && line.match(/\.m3u8($|\?.*)/i)) { bestVariantUrl = resolveUrl(baseUrl, line); logDebug(`Fallback: Found first sub-playlist URI: ${bestVariantUrl}`); break; } } }
     if (!bestVariantUrl) { logDebug(`No valid sub-playlist URI found in master: ${url}. Processing as media playlist.`); return processMediaPlaylist(url, content); }
     logDebug(`Selected sub-playlist (Bandwidth: ${highestBandwidth}): ${bestVariantUrl}`);
-    const { content: variantContent, contentType: variantContentType } = await fetchContentWithType(bestVariantUrl, {});
+    const { content: variantContent, contentType: variantContentType } = await fetchContentWithType(bestVariantUrl, {}, extraHeaders);
     if (!isM3u8Content(variantContent, variantContentType)) { logDebug(`Fetched sub-playlist ${bestVariantUrl} is not M3U8 (Type: ${variantContentType}). Treating as media playlist.`); return processMediaPlaylist(bestVariantUrl, variantContent); }
-    return await processM3u8Content(bestVariantUrl, variantContent, recursionDepth + 1);
+    return await processM3u8Content(bestVariantUrl, variantContent, recursionDepth + 1, extraHeaders);
 }
 
 
@@ -257,7 +271,10 @@ export const handler = async (event, context) => {
         };
     }
 
-    logDebug(`Processing proxy request for target: ${targetUrl}`);
+    const { cleanUrl, headers: extraHeaders } = extractHeadersFromUrl(targetUrl);
+    logDebug(`Clean URL: ${cleanUrl}, Extra Headers: ${JSON.stringify(extraHeaders)}`);
+
+    logDebug(`Processing proxy request for target: ${cleanUrl}`);
 
     try {
         // 验证鉴权
@@ -271,14 +288,14 @@ export const handler = async (event, context) => {
         }
 
         // Fetch Original Content (Pass Netlify event headers)
-        const { content, contentType, responseHeaders } = await fetchContentWithType(targetUrl, event.headers);
+        const { content, contentType, responseHeaders } = await fetchContentWithType(cleanUrl, event.headers, extraHeaders);
 
         // --- Process if M3U8 ---
         if (isM3u8Content(content, contentType)) {
-            logDebug(`Processing M3U8 content: ${targetUrl}`);
-            const processedM3u8 = await processM3u8Content(targetUrl, content);
+            logDebug(`Processing M3U8 content: ${cleanUrl}`);
+            const processedM3u8 = await processM3u8Content(cleanUrl, content, 0, extraHeaders);
 
-            logDebug(`Successfully processed M3U8 for ${targetUrl}`);
+            logDebug(`Successfully processed M3U8 for ${cleanUrl}`);
             return {
                 statusCode: 200,
                 headers: {
@@ -316,7 +333,7 @@ export const handler = async (event, context) => {
         }
 
     } catch (error) {
-        logDebug(`ERROR in proxy processing for ${targetUrl}: ${error.message}`);
+        logDebug(`ERROR in proxy processing for ${cleanUrl}: ${error.message}`);
         console.error(`[Proxy Error Stack Netlify] ${error.stack}`); // Log full stack
 
         const statusCode = error.status || 500; // Get status from error if available
@@ -327,7 +344,7 @@ export const handler = async (event, context) => {
             body: JSON.stringify({
                 success: false,
                 error: `Proxy processing error: ${error.message}`,
-                targetUrl: targetUrl
+                targetUrl: cleanUrl
             }),
         };
     }
