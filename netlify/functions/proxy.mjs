@@ -277,51 +277,9 @@ export const handler = async (event, context) => {
         };
     }
 
-    // --- Extract Target URL ---
-    // Based on netlify.toml rewrite: from = "/proxy/*" to = "/.netlify/functions/proxy/:splat"
-    // The :splat part should be available in event.path after the base path
-    let encodedUrlPath = '';
-    const proxyPrefix = '/proxy/'; // Match the 'from' path in netlify.toml
-    if (event.path && event.path.startsWith(proxyPrefix)) {
-        encodedUrlPath = event.path.substring(proxyPrefix.length);
-        logDebug(`Extracted encoded path from event.path: ${encodedUrlPath}`);
-    } else {
-        logDebug(`Could not extract encoded path from event.path: ${event.path}`);
-        // Potentially handle direct calls too? Less likely needed.
-        // const functionPath = '/.netlify/functions/proxy/';
-        // if (event.path && event.path.startsWith(functionPath)) {
-        //     encodedUrlPath = event.path.substring(functionPath.length);
-        // }
-    }
-
-    const targetUrl = getTargetUrlFromPath(encodedUrlPath);
-    logDebug(`Resolved target URL: ${targetUrl || 'null'}`);
-
-    if (!targetUrl) {
-        logDebug('Error: Invalid proxy request path.');
-        return {
-            statusCode: 400,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ success: false, error: "Invalid proxy request path. Could not extract target URL." }),
-        };
-    }
-
-    const { cleanUrl, headers: extraHeaders } = extractHeadersFromUrl(targetUrl);
-    logDebug(`Clean URL: ${cleanUrl}, Extra Headers: ${JSON.stringify(extraHeaders)}`);
-
     logDebug(`Processing proxy request for target: ${cleanUrl}`);
 
     try {
-        // 验证鉴权
-        const isValidAuth = validateAuth(event);
-        if (!isValidAuth) {
-            return {
-                statusCode: 403,
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ success: false, error: "Forbidden: Invalid auth credentials." }),
-            };
-        }
-
         // Fetch Original Content (Pass Netlify event headers)
         const { content, contentType, responseHeaders } = await fetchContentWithType(cleanUrl, event.headers, extraHeaders);
 
