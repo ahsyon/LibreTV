@@ -164,9 +164,14 @@ async function fetchContentWithType(targetUrl, requestHeaders, extraHeaders = {}
             const err = new Error(`HTTP error ${response.status}: ${response.statusText}. URL: ${targetUrl}. Body: ${errorBody.substring(0, 200)}`);
             err.status = response.status; throw err;
         }
-        const content = await response.text();
         const contentType = response.headers.get('content-type') || '';
-        logDebug(`Fetch success: ${targetUrl}, Content-Type: ${contentType}, Length: ${content.length}`);
+        // 二进制类型使用 buffer() 读取，避免 text() 损坏数据
+        const isBinary = contentType.startsWith('image/') ||
+                         contentType.startsWith('audio/') ||
+                         contentType.startsWith('video/') ||
+                         contentType === 'application/octet-stream';
+        const content = isBinary ? await response.buffer() : await response.text();
+        logDebug(`Fetch success: ${targetUrl}, Content-Type: ${contentType}, Binary: ${isBinary}, Length: ${content.length}`);
         return { content, contentType, responseHeaders: response.headers };
     } catch (error) {
         logDebug(`Fetch exception for ${targetUrl}: ${error.message}`);
@@ -317,11 +322,12 @@ export const handler = async (event, context) => {
              });
             netlifyHeaders['Cache-Control'] = `public, max-age=${CACHE_TTL}`; // Set our cache policy
 
+            const isBuffer = Buffer.isBuffer(content);
             return {
                 statusCode: 200,
                 headers: netlifyHeaders,
-                body: content, // Body as string
-                // isBase64Encoded: false, // Set true only if returning binary data as base64
+                body: isBuffer ? content.toString('base64') : content,
+                isBase64Encoded: isBuffer,
             };
         }
 
